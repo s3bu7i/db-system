@@ -1,0 +1,15 @@
+services:
+  excel-db-manager:
+    build: .
+    container_name: excel-db-manager
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATA_DIR: /app/data
+      UPLOAD_DIR: /app/uploads
+      # APP_USERNAME: admin
+      # APP_PASSWORD: change-this-password
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads

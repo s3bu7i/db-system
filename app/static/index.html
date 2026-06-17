@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="az">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Excel DB Manager</title>
+    <link rel="stylesheet" href="/static/styles.css?v=data-tools-20260616" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">XL</div>
+          <div>
+            <h1>Excel DB Manager</h1>
+            <p>Mərkəzləşdirilmiş Excel paneli</p>
+          </div>
+        </div>
+
+        <nav class="nav-list" aria-label="Əsas menyu">
+          <button class="nav-item active" data-view="files" type="button">Fayllar</button>
+          <button class="nav-item" data-view="categories" type="button">Bölmələr</button>
+          <button class="nav-item" data-view="viewer" type="button">Cədvəllər</button>
+          <button class="nav-item" data-view="merged" type="button">Birləşmiş data</button>
+        </nav>
+
+        <section class="folder-tree-panel">
+          <div class="folder-tree-head">
+            <span>Bolme agaci</span>
+            <button class="mini-button" id="clearTreeFilter" type="button">Hamisi</button>
+          </div>
+          <div class="folder-tree" id="categoryTree"></div>
+        </section>
+
+        <label class="field-label admin-only">
+          Yükləmə bölməsi
+          <select id="uploadCategorySelect"></select>
+        </label>
+
+        <label class="upload-zone admin-only" id="uploadZone">
+          <input id="fileInput" type="file" accept=".xlsx,.xlsm,.xltx,.xltm,.xls" multiple />
+          <span class="upload-icon">+</span>
+          <strong>Excel faylı yüklə</strong>
+          <small>.xlsx, .xlsm, .xls formatları</small>
+        </label>
+
+        <button class="button secondary" id="refreshBtn" type="button">Yenilə</button>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">İdarə paneli</p>
+            <h2 id="viewTitle">Fayllar</h2>
+          </div>
+          <div class="topbar-actions">
+            <input class="search-input" id="globalSearch" type="search" placeholder="Axtar..." />
+            <button class="button secondary" id="themeToggle" type="button">Dim</button>
+            <span class="admin-status" id="adminStatus">Adi baxış</span>
+            <button class="button secondary" id="adminLoginBtn" type="button">Admin</button>
+            <button class="button ghost hidden" id="adminLogoutBtn" type="button">Çıxış</button>
+          </div>
+        </header>
+
+        <section class="summary-strip">
+          <div>
+            <span>Fayllar</span>
+            <strong id="totalFiles">0</strong>
+          </div>
+          <div>
+            <span>Bölmələr</span>
+            <strong id="totalCategories">0</strong>
+          </div>
+          <div>
+            <span>Sətirlər</span>
+            <strong id="totalRows">0</strong>
+          </div>
+          <div>
+            <span>Status</span>
+            <strong id="systemStatus">Hazır</strong>
+          </div>
+        </section>
+
+        <section class="view-page active" id="filesView">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Fayllar</p>
+              <h3>Import olunmuş Excel faylları</h3>
+            </div>
+            <label class="field-label inline-field">
+              Bölmə filteri
+              <select id="fileCategoryFilter"></select>
+            </label>
+            <label class="field-label inline-field">
+              Status
+              <select id="fileStatusFilter">
+                <option value="">Hamısı</option>
+                <option value="queued">Növbədə</option>
+                <option value="ready">Hazır</option>
+                <option value="importing">Import gedir</option>
+                <option value="failed">Xəta</option>
+              </select>
+            </label>
+            <label class="field-label inline-field">
+              Sıralama
+              <select id="fileSort">
+                <option value="newest">Yeni yüklənən</option>
+                <option value="name">Fayl adı</option>
+                <option value="category">Bölmə</option>
+                <option value="rows">Sətir sayı</option>
+                <option value="sheets">Sheet sayı</option>
+              </select>
+            </label>
+            <div class="segmented-control" aria-label="Fayl gorunusu">
+              <button class="active" data-files-layout="cards" type="button">Kart</button>
+              <button data-files-layout="list" type="button">List</button>
+            </div>
+            <span class="result-count" id="fileResultCount">0 fayl</span>
+            <button class="button danger admin-only" id="deleteAllFilesBtn" type="button">Hamısını sil</button>
+          </div>
+          <div class="files-grid" id="filesGrid"></div>
+        </section>
+
+        <section class="view-page" id="categoriesView">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Bölmələr</p>
+              <h3>Faylları qruplara ayır</h3>
+            </div>
+            <form class="add-category-form admin-only" id="addCategoryForm">
+              <label class="field-label category-parent-field">
+                Üst bölmə
+                <select id="newCategoryParent">
+                  <option value="">Kök bölmə</option>
+                </select>
+              </label>
+              <input class="search-input" id="newCategoryName" type="text" placeholder="Yeni bölmə adı" />
+              <button class="button" type="submit">Əlavə et</button>
+            </form>
+          </div>
+          <div class="category-grid" id="categoryGrid"></div>
+        </section>
+
+        <section class="view-page" id="viewerView">
+          <div class="control-bar">
+            <label class="field-label">
+              Fayl axtar
+              <input id="viewerFileSearch" type="search" placeholder="Fayl adı və ya bölmə..." />
+            </label>
+            <label class="field-label">
+              Fayl
+              <select id="fileSelect"></select>
+            </label>
+            <label class="field-label">
+              Sheet
+              <select id="sheetSelect"></select>
+            </label>
+          </div>
+
+          <div class="table-panel">
+            <div class="table-toolbar">
+              <div>
+                <p class="eyebrow">Cədvəl datası</p>
+                <h3 id="sheetTitle">Sheet seçin</h3>
+              </div>
+              <div class="table-actions">
+                <div class="segmented-control" aria-label="Cedvel gorunusu">
+                  <button class="active" data-table-mode="clean" type="button">Temiz</button>
+                  <button data-table-mode="excel" type="button">Excel kimi</button>
+                </div>
+                <span class="result-count" id="sheetSearchCount">0 netice</span>
+                <button class="button secondary" id="copySheetBtn" type="button">Copy</button>
+                <button class="button secondary" id="exportSheetBtn" type="button">Export</button>
+                <button class="button secondary" id="fullscreenSheetBtn" type="button">Fullscreen</button>
+              </div>
+              <div class="pager">
+                <button class="button secondary" id="prevPage" type="button">Geri</button>
+                <span id="pageInfo">0-0</span>
+                <button class="button secondary" id="nextPage" type="button">İrəli</button>
+                <select id="pageSize">
+                  <option value="50">50</option>
+                  <option value="100" selected>100</option>
+                  <option value="250">250</option>
+                  <option value="500">500</option>
+                  <option value="1000">1000</option>
+                </select>
+              </div>
+            </div>
+            <div class="table-wrap" id="tableWrap"></div>
+          </div>
+        </section>
+
+        <section class="view-page" id="mergedView">
+          <div class="merge-layout">
+            <aside class="merge-controls">
+              <label class="field-label">
+                Bölmə
+                <select id="mergedCategoryFilter"></select>
+              </label>
+              <div class="merge-actions">
+                <button class="button secondary" id="selectVisibleFiles" type="button">Görünənləri seç</button>
+                <button class="button secondary" id="clearSelectedFiles" type="button">Təmizlə</button>
+              </div>
+              <div class="file-check-list" id="mergeFileList"></div>
+            </aside>
+
+            <div class="table-panel">
+              <div class="table-toolbar">
+                <div>
+                  <p class="eyebrow">Xüsusi merge</p>
+                  <h3 id="mergedTitle">Bütün Excel dataları</h3>
+                </div>
+                <div class="table-actions">
+                  <span class="result-count" id="mergedSearchCount">0 netice</span>
+                  <button class="button secondary" id="copyMergedBtn" type="button">Copy</button>
+                  <button class="button secondary" id="exportMergedBtn" type="button">Export</button>
+                  <button class="button secondary" id="fullscreenMergedBtn" type="button">Fullscreen</button>
+                </div>
+                <div class="pager">
+                  <button class="button secondary" id="mergedPrevPage" type="button">Geri</button>
+                  <span id="mergedPageInfo">0-0</span>
+                  <button class="button secondary" id="mergedNextPage" type="button">İrəli</button>
+                  <select id="mergedPageSize">
+                    <option value="50">50</option>
+                    <option value="100" selected>100</option>
+                    <option value="250">250</option>
+                    <option value="500">500</option>
+                    <option value="1000">1000</option>
+                  </select>
+                </div>
+              </div>
+              <div class="table-wrap" id="mergedTableWrap"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast"></div>
+    <div class="modal-backdrop hidden" id="adminModal">
+      <form class="admin-modal" id="adminLoginForm">
+        <div>
+          <p class="eyebrow">Admin</p>
+          <h3>Admin girişi</h3>
+        </div>
+        <label class="field-label">
+          İstifadəçi adı
+          <input id="adminUsername" type="text" autocomplete="username" />
+        </label>
+        <label class="field-label">
+          Şifrə
+          <input id="adminPassword" type="password" autocomplete="current-password" />
+        </label>
+        <div class="file-actions">
+          <button class="button" type="submit">Daxil ol</button>
+          <button class="button secondary" id="adminModalCancel" type="button">Bağla</button>
+        </div>
+      </form>
+    </div>
+    <script src="/static/app.js?v=data-tools-20260616"></script>
+  </body>
+</html>
