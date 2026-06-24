@@ -75,6 +75,7 @@ def init_db() -> None:
                 sheet_id INTEGER NOT NULL,
                 row_number INTEGER NOT NULL,
                 cells_json TEXT NOT NULL,
+                styles_json TEXT NOT NULL DEFAULT '{}',
                 FOREIGN KEY(sheet_id) REFERENCES sheets(id) ON DELETE CASCADE,
                 UNIQUE(sheet_id, row_number)
             );
@@ -90,12 +91,18 @@ def init_db() -> None:
         columns = [row["name"] for row in conn.execute("PRAGMA table_info(files)")]
         if "category_id" not in columns:
             conn.execute("ALTER TABLE files ADD COLUMN category_id INTEGER")
+        if "display_name" not in columns:
+            conn.execute("ALTER TABLE files ADD COLUMN display_name TEXT")
 
         sheet_columns = [row["name"] for row in conn.execute("PRAGMA table_info(sheets)")]
         if "meta_json" not in sheet_columns:
             conn.execute("ALTER TABLE sheets ADD COLUMN meta_json TEXT NOT NULL DEFAULT '{}'")
         if "heading_text" not in sheet_columns:
             conn.execute("ALTER TABLE sheets ADD COLUMN heading_text TEXT NOT NULL DEFAULT ''")
+
+        row_columns = [row["name"] for row in conn.execute("PRAGMA table_info(sheet_rows)")]
+        if "styles_json" not in row_columns:
+            conn.execute("ALTER TABLE sheet_rows ADD COLUMN styles_json TEXT NOT NULL DEFAULT '{}'")
 
         category_columns = [row["name"] for row in conn.execute("PRAGMA table_info(categories)")]
         if "parent_id" not in category_columns:

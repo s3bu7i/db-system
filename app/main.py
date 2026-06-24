@@ -191,7 +191,7 @@ def list_files() -> dict[str, list[dict]]:
         file_item["sheets"] = by_file.get(file_item["id"], [])
         if file_item.get("category_id") in category_paths:
             file_item["category_name"] = category_paths[file_item["category_id"]]
-        file_item["original_name"] = _display_file_name(file_item["original_name"], file_item["sheets"])
+        file_item["original_name"] = _file_display_name(file_item, file_item["sheets"])
     return {"files": files}
 
 
@@ -284,6 +284,24 @@ def update_file_category(
     return {"ok": True}
 
 
+@app.patch("/api/files/{file_id}/name", dependencies=[Depends(require_admin)])
+def update_file_name(
+    file_id: int,
+    name: str = Body(..., embed=True, min_length=1, max_length=180),
+) -> dict[str, bool | str]:
+    clean_name = _clean_file_display_name(name)
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="Fayl adi bos ola bilmez")
+
+    with get_conn() as conn:
+        row = conn.execute("SELECT id FROM files WHERE id = ?", (file_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Fayl tapilmadi")
+        conn.execute("UPDATE files SET display_name = ? WHERE id = ?", (clean_name, file_id))
+        conn.commit()
+    return {"ok": True, "name": clean_name}
+
+
 @app.get("/api/files/{file_id}")
 def get_file(file_id: int) -> dict:
     with get_conn() as conn:
@@ -320,14 +338,17 @@ def get_file(file_id: int) -> dict:
 
     item = dict(file_row)
     item["sheets"] = sheets
-    item["original_name"] = _display_file_name(item["original_name"], sheets)
+    item["original_name"] = _file_display_name(item, sheets)
     return item
 
 
 @app.get("/api/files/{file_id}/download")
 def download_file(file_id: int) -> FileResponse:
     with get_conn() as conn:
-        row = conn.execute("SELECT original_name, stored_name FROM files WHERE id = ?", (file_id,)).fetchone()
+        row = conn.execute(
+            "SELECT original_name, display_name, stored_name FROM files WHERE id = ?",
+            (file_id,),
+        ).fetchone()
         sheets = [
             dict(sheet)
             for sheet in conn.execute(
@@ -341,7 +362,7 @@ def download_file(file_id: int) -> FileResponse:
     path = UPLOAD_DIR / row["stored_name"]
     if not path.exists():
         raise HTTPException(status_code=404, detail="Orijinal fayl diskde yoxdur")
-    display_name = _display_file_name(row["original_name"], sheets)
+    display_name = _file_display_name(dict(row), sheets)
     return FileResponse(path, filename=_download_filename(display_name, row["stored_name"]))
 
 
@@ -409,10 +430,14 @@ def get_sheet_rows(
         ).fetchone()["count"]
 
         rows = [
-            {"row_number": row["row_number"], "cells": _loads(row["cells_json"])}
+            {
+                "row_number": row["row_number"],
+                "cells": _loads(row["cells_json"]),
+                "styles": _loads(row["styles_json"] or "{}"),
+            }
             for row in conn.execute(
                 f"""
-                SELECT row_number, cells_json
+                SELECT row_number, cells_json, styles_json
                   FROM sheet_rows
                  {where}
                  ORDER BY row_number
@@ -482,24 +507,28 @@ def get_merged_rows(
         rows = [
             {
                 "file_id": row["file_id"],
-                "file_name": _display_file_name(row["file_name"], [{"name": row["sheet_name"]}]),
+                "file_name": row["file_display_name"]
+                or _display_file_name(row["file_name"], [{"name": row["sheet_name"]}]),
                 "category_id": row["category_id"],
                 "category_name": category_paths.get(row["category_id"], row["category_name"]),
                 "sheet_id": row["sheet_id"],
                 "sheet_name": row["sheet_name"],
                 "row_number": row["row_number"],
                 "cells": _loads(row["cells_json"]),
+                "styles": _loads(row["styles_json"] or "{}"),
             }
             for row in conn.execute(
                 f"""
                 SELECT f.id AS file_id,
                        f.original_name AS file_name,
+                       f.display_name AS file_display_name,
                        f.category_id,
                        c.name AS category_name,
                        s.id AS sheet_id,
                        s.name AS sheet_name,
                        r.row_number,
-                       r.cells_json
+                       r.cells_json,
+                       r.styles_json
                   FROM sheet_rows r
                   JOIN sheets s ON s.id = r.sheet_id
                   JOIN files f ON f.id = s.file_id
@@ -571,6 +600,20 @@ def _download_filename(display_name: str, stored_name: str) -> str:
     if suffix and Path(display_name).suffix.lower() != suffix.lower():
         return f"{display_name}{suffix}"
     return display_name
+
+
+def _file_display_name(file_item: dict, sheets: list[dict]) -> str:
+    custom_name = str(file_item.get("display_name") or "").strip()
+    if custom_name:
+        return custom_name
+    return _display_file_name(str(file_item.get("original_name") or ""), sheets)
+
+
+def _clean_file_display_name(name: str) -> str:
+    value = re.sub(r"\s+", " ", str(name or "").replace("\n", " ")).strip()
+    value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", value)
+    value = re.sub(r"\s+", " ", value).strip(" .")
+    return value[:180]
 
 
 def _display_file_name(name: str, sheets: list[dict]) -> str:
@@ -694,9 +737,17 @@ def _merged_filters(q: str, category_id: int | None, file_ids: list[int]) -> tup
     params: list[object] = []
 
     if q.strip():
-        filters.append("(r.cells_json LIKE ? OR f.original_name LIKE ? OR s.name LIKE ? OR c.name LIKE ?)")
+        filters.append(
+            "("
+            "r.cells_json LIKE ? OR "
+            "f.original_name LIKE ? OR "
+            "COALESCE(NULLIF(f.display_name, ''), '') LIKE ? OR "
+            "s.name LIKE ? OR "
+            "c.name LIKE ?"
+            ")"
+        )
         pattern = f"%{q.strip()}%"
-        params.extend([pattern, pattern, pattern, pattern])
+        params.extend([pattern, pattern, pattern, pattern, pattern])
 
     if category_id is not None:
         with get_conn() as conn:

@@ -18,6 +18,8 @@ const state = {
   viewerFileSearch: "",
   mergedCategoryFilter: "",
   selectedMergeFileIds: new Set(),
+  expandedCategoryIds: new Set(JSON.parse(localStorage.getItem("expandedCategoryIds") || "[]")),
+  viewHistory: [],
   currentSheetData: null,
   currentMergedData: null,
   isAdmin: false,
@@ -48,6 +50,7 @@ const el = {
   newCategoryName: document.getElementById("newCategoryName"),
   viewTitle: document.getElementById("viewTitle"),
   globalSearch: document.getElementById("globalSearch"),
+  backBtn: document.getElementById("backBtn"),
   themeToggle: document.getElementById("themeToggle"),
   adminStatus: document.getElementById("adminStatus"),
   adminLoginBtn: document.getElementById("adminLoginBtn"),
@@ -257,17 +260,21 @@ function renderCategoryOptions() {
 function renderCategoryTree() {
   if (!el.categoryTree) return;
   if (!state.categories.length) {
-    el.categoryTree.innerHTML = `<div class="tree-empty">Bolme yoxdur</div>`;
+    el.categoryTree.innerHTML = `<div class="tree-empty">Bölmə yoxdur</div>`;
     return;
   }
 
   el.categoryTree.innerHTML = state.categories
+    .filter((category) => isCategoryVisibleInTree(category))
     .map((category) => {
       const fileCount = filesByCategory(category.id).length;
       const isActive = state.fileCategoryFilter && String(category.id) === String(state.fileCategoryFilter);
+      const hasChildren = categoryHasChildren(category.id);
+      const isExpanded = state.expandedCategoryIds.has(Number(category.id));
+      const arrow = hasChildren ? (isExpanded ? "▾" : "▸") : "";
       return `
-        <button class="tree-node ${isActive ? "active" : ""}" data-tree-category="${category.id}" style="--tree-level:${category.level || 0}" type="button">
-          <span class="tree-icon">${category.level ? "└" : "▾"}</span>
+        <button class="tree-node ${isActive ? "active" : ""} ${hasChildren ? "has-children" : ""}" data-tree-category="${category.id}" data-has-children="${hasChildren ? "1" : "0"}" style="--tree-level:${category.level || 0}" type="button">
+          <span class="tree-icon"><span class="tree-arrow">${arrow}</span><span class="tree-folder ${hasChildren && isExpanded ? "open" : ""}" aria-hidden="true"></span></span>
           <span class="tree-name">${escapeHtml(category.name)}</span>
           <span class="tree-count">${formatNumber(fileCount)}</span>
         </button>
@@ -329,21 +336,96 @@ function renderSheetSelect() {
   }
 }
 
-function switchView(view) {
+function currentViewSnapshot() {
+  return {
+    view: state.view,
+    search: state.search,
+    fileCategoryFilter: state.fileCategoryFilter,
+    fileStatusFilter: state.fileStatusFilter,
+    fileSort: state.fileSort,
+    selectedFileId: state.selectedFileId,
+    selectedSheetId: state.selectedSheetId,
+    sheetOffset: state.sheetOffset,
+    mergedOffset: state.mergedOffset,
+    mergedCategoryFilter: state.mergedCategoryFilter,
+    selectedMergeFileIds: [...state.selectedMergeFileIds],
+  };
+}
+
+function snapshotsMatch(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function pushViewHistory() {
+  const snapshot = currentViewSnapshot();
+  const last = state.viewHistory[state.viewHistory.length - 1];
+  if (last && snapshotsMatch(last, snapshot)) return;
+  state.viewHistory.push(snapshot);
+  if (state.viewHistory.length > 25) {
+    state.viewHistory.shift();
+  }
+}
+
+function restoreViewSnapshot(snapshot) {
+  if (!snapshot) return;
+  state.view = snapshot.view === "merged" && !state.isAdmin ? "files" : snapshot.view;
+  state.search = snapshot.search || "";
+  state.fileCategoryFilter = snapshot.fileCategoryFilter || "";
+  state.fileStatusFilter = snapshot.fileStatusFilter || "";
+  state.fileSort = snapshot.fileSort || "newest";
+  state.selectedFileId = snapshot.selectedFileId || null;
+  state.selectedSheetId = snapshot.selectedSheetId || null;
+  state.sheetOffset = snapshot.sheetOffset || 0;
+  state.mergedOffset = snapshot.mergedOffset || 0;
+  state.mergedCategoryFilter = snapshot.mergedCategoryFilter || "";
+  state.selectedMergeFileIds = new Set(snapshot.selectedMergeFileIds || []);
+
+  el.globalSearch.value = state.search;
+  el.fileCategoryFilter.value = state.fileCategoryFilter;
+  el.fileStatusFilter.value = state.fileStatusFilter;
+  el.fileSort.value = state.fileSort;
+  renderCategoryTree();
+  renderFileControls();
+  renderActiveView();
+}
+
+function goBack() {
+  const previous = state.viewHistory.pop();
+  restoreViewSnapshot(previous);
+}
+
+function renderBackButton() {
+  if (!el.backBtn) return;
+  el.backBtn.classList.toggle("hidden", state.viewHistory.length === 0);
+}
+
+function switchView(view, { recordHistory = true, resetSearch = true } = {}) {
+  if (view === "merged" && !state.isAdmin) {
+    view = "files";
+  }
+  if (recordHistory) {
+    pushViewHistory();
+  }
   state.view = view;
-  state.search = "";
+  if (resetSearch) {
+    state.search = "";
+    el.globalSearch.value = "";
+  }
   state.sheetOffset = 0;
   state.mergedOffset = 0;
-  el.globalSearch.value = "";
   renderActiveView();
 }
 
 function renderActiveView() {
+  if (state.view === "merged" && !state.isAdmin) {
+    state.view = "files";
+  }
   el.navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === state.view));
   el.filesView.classList.toggle("active", state.view === "files");
   el.categoriesView.classList.toggle("active", state.view === "categories");
   el.viewerView.classList.toggle("active", state.view === "viewer");
   el.mergedView.classList.toggle("active", state.view === "merged");
+  renderBackButton();
 
   if (state.view === "files") {
     el.viewTitle.textContent = "Fayllar";
@@ -418,8 +500,15 @@ function renderFilesPage() {
     card.className = "file-card";
     card.innerHTML = `
       <div class="file-name">${escapeHtml(file.original_name)}</div>
+      <label class="field-label admin-only">
+        Fayl adı
+        <div class="inline-edit">
+          <input data-file-name-input="${file.id}" type="text" maxlength="180" value="${escapeHtml(file.original_name)}" />
+          <button class="button secondary" data-action="rename" data-id="${file.id}" type="button">Saxla</button>
+        </div>
+      </label>
       <div class="file-meta-row">
-        <span class="file-meta">${formatBytes(file.size_bytes)}</span>
+        <span class="file-meta admin-only file-admin-detail">${formatBytes(file.size_bytes)}</span>
         <span class="status ${file.status}">${statusLabel(file.status)}</span>
       </div>
       <label class="field-label admin-only">
@@ -433,17 +522,17 @@ function renderFilesPage() {
         <div>Bölmə: <span>${escapeHtml(file.category_name || "Bölməsiz")}</span></div>
         <div>Sheet: <span>${formatNumber(file.sheets.length)}</span></div>
         <div>Sətir: <span>${formatNumber(rowCount)}</span></div>
-        <div>Yüklənmə: <span>${escapeHtml(file.uploaded_at || "")}</span></div>
-        <div>Import: <span>${escapeHtml(file.imported_at || "-")}</span></div>
-        <div>SHA256: <span>${escapeHtml((file.sha256 || "").slice(0, 16))}...</span></div>
-        <div>Sheet adları: <span>${escapeHtml(sheetNames || "-")}</span></div>
+        <div class="admin-only file-admin-detail">Yüklənmə: <span>${escapeHtml(file.uploaded_at || "")}</span></div>
+        <div class="admin-only file-admin-detail">Import: <span>${escapeHtml(file.imported_at || "-")}</span></div>
+        <div class="admin-only file-admin-detail">SHA256: <span>${escapeHtml((file.sha256 || "").slice(0, 16))}...</span></div>
+        <div class="admin-only file-admin-detail">Sheet adları: <span>${escapeHtml(sheetNames || "-")}</span></div>
       </div>
       ${snippet ? `<small class="match-snippet strong">Tapıldı: ${highlightMatch(snippet, query)}</small>` : ""}
-      <div class="progress"><span style="width:${file.progress}%"></span></div>
-      <div class="file-meta">${escapeHtml(file.message || "")}</div>
+      <div class="progress admin-only file-admin-detail"><span style="width:${file.progress}%"></span></div>
+      <div class="file-meta admin-only file-admin-detail">${escapeHtml(file.message || "")}</div>
       <div class="file-actions">
         <button class="button secondary" data-action="view" data-id="${file.id}" type="button" ${file.status === "ready" ? "" : "disabled"}>Bax</button>
-        <button class="button secondary" data-action="merge-one" data-id="${file.id}" type="button" ${file.status === "ready" ? "" : "disabled"}>Merge</button>
+        <button class="button secondary admin-only" data-action="merge-one" data-id="${file.id}" type="button" ${file.status === "ready" ? "" : "disabled"}>Merge</button>
         <button class="button secondary admin-only" data-action="reimport" data-id="${file.id}" type="button">Yenidən import</button>
         <a class="button ghost" href="/api/files/${file.id}/download">Endir</a>
         <button class="button danger admin-only" data-action="delete" data-id="${file.id}" type="button">Sil</button>
@@ -462,6 +551,10 @@ function renderFilesList(files) {
         <tr>
           <td class="file-list-name">
             <strong>${escapeHtml(file.original_name)}</strong>
+            <div class="inline-edit admin-only">
+              <input data-file-name-input="${file.id}" type="text" maxlength="180" value="${escapeHtml(file.original_name)}" aria-label="Fayl adı" />
+              <button class="button secondary" data-action="rename" data-id="${file.id}" type="button">Saxla</button>
+            </div>
             ${snippet ? `<small class="match-snippet">Tapildi: ${highlightMatch(snippet, state.search)}</small>` : ""}
           </td>
           <td>${escapeHtml(file.category_name || "Bolmesiz")}</td>
@@ -470,7 +563,7 @@ function renderFilesList(files) {
           <td><span class="status ${file.status}">${statusLabel(file.status)}</span></td>
           <td class="file-list-actions">
             <button class="button secondary" data-action="view" data-id="${file.id}" type="button" ${file.status === "ready" ? "" : "disabled"}>Bax</button>
-            <button class="button secondary" data-action="merge-one" data-id="${file.id}" type="button" ${file.status === "ready" ? "" : "disabled"}>Merge</button>
+            <button class="button secondary admin-only" data-action="merge-one" data-id="${file.id}" type="button" ${file.status === "ready" ? "" : "disabled"}>Merge</button>
           </td>
         </tr>
       `;
@@ -536,20 +629,6 @@ function renderCategoriesPage() {
     const files = filesByCategory(category.id);
     const sheetCount = files.reduce((sum, file) => sum + file.sheets.length, 0);
     const rowCount = files.reduce((sum, file) => sum + file.sheets.reduce((sheetSum, sheet) => sheetSum + sheet.row_count, 0), 0);
-    const visibleFiles = query ? files.filter((file) => fileSearchText(file).includes(query)) : files;
-    const previewFiles = visibleFiles.length ? visibleFiles : files;
-    const preview = previewFiles
-      .slice(0, 8)
-      .map((file) => {
-        const snippet = query ? matchedHeadingSnippet(file, query) : "";
-        return `
-          <div>
-            ${escapeHtml(file.original_name)} <span class="muted">(${statusLabel(file.status)})</span>
-            ${snippet ? `<small class="match-snippet">Tapıldı: ${highlightMatch(snippet, query)}</small>` : ""}
-          </div>
-        `;
-      })
-      .join("");
     const childCategories = state.categories.filter((item) => item.parent_id === category.id);
     const childPreview = childCategories
       .slice(0, 5)
@@ -559,18 +638,19 @@ function renderCategoriesPage() {
     card.className = "category-card";
     card.style.setProperty("--category-level", category.level || 0);
     card.innerHTML = `
-      <h4>${escapeHtml(category.name)}</h4>
-      ${category.path && category.path !== category.name ? `<small class="file-meta">${escapeHtml(category.path)}</small>` : ""}
-      <div class="file-meta-row">
-        <span class="file-meta">${formatNumber(files.length)} fayl</span>
-        <span class="file-meta">${formatNumber(sheetCount)} sheet</span>
-        <span class="file-meta">${formatNumber(rowCount)} sətir</span>
+      <div class="category-title-block">
+        <h4>${escapeHtml(category.name)}</h4>
+        ${category.path && category.path !== category.name ? `<small>${escapeHtml(category.path)}</small>` : `<small>Kök bölmə</small>`}
+      </div>
+      <div class="category-stats">
+        <div><strong>${formatNumber(files.length)}</strong><span>fayl</span></div>
+        <div><strong>${formatNumber(sheetCount)}</strong><span>sheet</span></div>
+        <div><strong>${formatNumber(rowCount)}</strong><span>sətir</span></div>
       </div>
       ${childPreview ? `<div class="folder-chip-row">${childPreview}</div>` : ""}
-      <div class="mini-list">${preview || `<div class="muted">Bu bölmədə fayl yoxdur.</div>`}</div>
-      <div class="file-actions">
-        <button class="button secondary" data-action="open-category" data-id="${category.id}" type="button">Fayllar</button>
-        <button class="button secondary" data-action="merge-category" data-id="${category.id}" type="button">Merge et</button>
+      <div class="file-actions category-actions">
+        <button class="button category-open-button" data-action="open-category" data-id="${category.id}" type="button">Fayllar</button>
+        <button class="button secondary admin-only" data-action="merge-category" data-id="${category.id}" type="button">Merge et</button>
         <button class="button secondary admin-only" data-action="sub-category" data-id="${category.id}" type="button">Alt bölmə</button>
         <button class="button danger admin-only" data-action="delete-category" data-id="${category.id}" type="button">Sil</button>
       </div>
@@ -661,6 +741,7 @@ function prepareSheetView(rows, columns, meta = {}) {
   const visibleRows = rows.map((row) => ({
     ...row,
     cells: row.cells.slice(start, end + 1),
+    styles: shiftRowStyles(row.styles, start, end),
   }));
   const visibleMeta = {
     ...meta,
@@ -674,6 +755,21 @@ function prepareSheetView(rows, columns, meta = {}) {
     columns: columns.slice(start, end + 1),
     meta: visibleMeta,
   };
+}
+
+function shiftRowStyles(styles = {}, startIndex, endIndex) {
+  const bold = (styles.bold || [])
+    .filter((index) => index >= startIndex && index <= endIndex)
+    .map((index) => index - startIndex);
+  return bold.length ? { bold } : {};
+}
+
+function isBoldCell(row, index) {
+  return Array.isArray(row?.styles?.bold) && row.styles.bold.includes(index);
+}
+
+function rowHasBold(row) {
+  return Array.isArray(row?.styles?.bold) && row.styles.bold.length > 0;
 }
 
 function visibleColumnWindow(rows, meta = {}) {
@@ -755,40 +851,48 @@ function renderExcelLikeRows(rows, columns, meta = {}, query = "") {
       const rowAttributes = `class="${rowClass}" ${finalRowStyle ? `style="${finalRowStyle}"` : ""}`;
 
       if (isTitle && !mergeMap.hasMerges) {
+        const titleClass = rowHasBold(row) ? "excel-title-cell bold-cell" : "excel-title-cell";
         return `
           <tr ${rowAttributes}>
-            <td class="excel-title-cell" colspan="${columns.length}">${highlightMatch(bestTitleText(row.cells), query)}${resizeHandle}</td>
+            <td class="${titleClass}" colspan="${columns.length}">${highlightMatch(bestTitleText(row.cells), query)}${resizeHandle}</td>
           </tr>
         `;
       }
 
       const cells = isHeaderZone
-        ? renderHeaderCells(row.cells, columns.length, row.row_number, mergeMap, isTitle, query)
-        : renderBodyCells(row.cells, columns.length, query);
+        ? renderHeaderCells(row, columns.length, mergeMap, isTitle, query)
+        : renderBodyCells(row, columns.length, query);
       return `<tr ${rowAttributes}>${cells.replace("</td>", `${resizeHandle}</td>`)}</tr>`;
     })
     .join("");
 }
 
-function renderBodyCells(cells, columnCount, query = "") {
+function renderBodyCells(row, columnCount, query = "") {
+  const cells = row.cells || [];
   const labelIndex = findRowLabelIndex(cells);
   return Array.from({ length: columnCount }, (_, index) => {
     const value = cells[index] ?? "";
-    const className = index === labelIndex ? "row-label-cell" : numericLike(value) ? "number-cell" : "";
+    const className = [
+      index === labelIndex ? "row-label-cell" : numericLike(value) ? "number-cell" : "",
+      isBoldCell(row, index) ? "bold-cell" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
     const style = tableCellStyle("sheet", index, index === labelIndex ? `--label-left:${stickyLeftOffset("sheet", index)}px` : "");
     return `<td class="${className}" ${style} title="${escapeHtml(value)}">${formatCellContent(value, query)}${columnResizeHandle("sheet", index)}</td>`;
   }).join("");
 }
 
-function renderHeaderCells(cells, columnCount, rowNumber, mergeMap, isTitle = false, query = "") {
+function renderHeaderCells(row, columnCount, mergeMap, isTitle = false, query = "") {
+  const cells = row.cells || [];
   if (!mergeMap.hasMerges) {
-    return renderHeuristicHeaderCells(cells, columnCount, query);
+    return renderHeuristicHeaderCells(row, columnCount, query);
   }
 
   let html = "";
   let colNumber = 1;
   while (colNumber <= columnCount) {
-    const cellKey = `${rowNumber}:${colNumber}`;
+    const cellKey = `${row.row_number}:${colNumber}`;
     if (mergeMap.covered.has(cellKey)) {
       colNumber += 1;
       continue;
@@ -799,7 +903,11 @@ function renderHeaderCells(cells, columnCount, rowNumber, mergeMap, isTitle = fa
     const attributes = merge
       ? `${merge.colSpan > 1 ? ` colspan="${merge.colSpan}"` : ""}${merge.rowSpan > 1 ? ` rowspan="${merge.rowSpan}"` : ""}`
       : "";
-    const className = [merge ? "excel-merged-header" : "", isTitle ? "excel-title-cell" : ""]
+    const className = [
+      merge ? "excel-merged-header" : "",
+      isTitle ? "excel-title-cell" : "",
+      isBoldCell(row, colNumber - 1) ? "bold-cell" : "",
+    ]
       .filter(Boolean)
       .join(" ");
     html += `<td class="${className}" ${attributes} ${tableCellStyle("sheet", colNumber - 1)} title="${escapeHtml(value)}">${formatCellContent(value, query)}${columnResizeHandle("sheet", colNumber - 1)}</td>`;
@@ -808,7 +916,8 @@ function renderHeaderCells(cells, columnCount, rowNumber, mergeMap, isTitle = fa
   return html;
 }
 
-function renderHeuristicHeaderCells(cells, columnCount, query = "") {
+function renderHeuristicHeaderCells(row, columnCount, query = "") {
+  const cells = row.cells || [];
   let html = "";
   let index = 0;
   while (index < columnCount) {
@@ -818,10 +927,12 @@ function renderHeuristicHeaderCells(cells, columnCount, query = "") {
       while (index + span < columnCount && (cells[index + span] ?? "") === "") {
         span += 1;
       }
-      html += `<td class="excel-merged-header" colspan="${span}" ${tableCellStyle("sheet", index)} title="${escapeHtml(value)}">${formatCellContent(value, query)}${columnResizeHandle("sheet", index)}</td>`;
+      const className = ["excel-merged-header", isBoldCell(row, index) ? "bold-cell" : ""].filter(Boolean).join(" ");
+      html += `<td class="${className}" colspan="${span}" ${tableCellStyle("sheet", index)} title="${escapeHtml(value)}">${formatCellContent(value, query)}${columnResizeHandle("sheet", index)}</td>`;
       index += span;
     } else {
-      html += `<td ${tableCellStyle("sheet", index)} title="${escapeHtml(value)}">${formatCellContent(value, query)}${columnResizeHandle("sheet", index)}</td>`;
+      const className = isBoldCell(row, index) ? ` class="bold-cell"` : "";
+      html += `<td${className} ${tableCellStyle("sheet", index)} title="${escapeHtml(value)}">${formatCellContent(value, query)}${columnResizeHandle("sheet", index)}</td>`;
       index += 1;
     }
   }
@@ -1093,7 +1204,8 @@ function renderMergedTable(data) {
       const cells = columns
         .map((_, index) => {
           const value = row.cells[index] ?? "";
-          return `<td ${tableCellStyle("merged", index)} title="${escapeHtml(value)}">${formatCellContent(value, query)}${columnResizeHandle("merged", index)}</td>`;
+          const className = isBoldCell(row, index) ? ` class="bold-cell"` : "";
+          return `<td${className} ${tableCellStyle("merged", index)} title="${escapeHtml(value)}">${formatCellContent(value, query)}${columnResizeHandle("merged", index)}</td>`;
         })
         .join("");
       return `
@@ -1288,6 +1400,43 @@ function directFilesByCategory(categoryId) {
   return state.files.filter((file) => file.category_id === categoryId);
 }
 
+function categoryHasChildren(categoryId) {
+  return state.categories.some((category) => Number(category.parent_id) === Number(categoryId));
+}
+
+function isCategoryVisibleInTree(category) {
+  const parentId = category.parent_id;
+  if (!parentId) return true;
+
+  let currentParentId = parentId;
+  while (currentParentId) {
+    if (!state.expandedCategoryIds.has(Number(currentParentId))) return false;
+    const parent = selectedCategory(currentParentId);
+    currentParentId = parent?.parent_id || null;
+  }
+  return true;
+}
+
+function expandCategoryPath(categoryId, { includeSelf = false } = {}) {
+  const category = selectedCategory(categoryId);
+  if (!category) return;
+
+  if (includeSelf && categoryHasChildren(category.id)) {
+    state.expandedCategoryIds.add(Number(category.id));
+  }
+
+  let parentId = category.parent_id;
+  while (parentId) {
+    state.expandedCategoryIds.add(Number(parentId));
+    parentId = selectedCategory(parentId)?.parent_id || null;
+  }
+  persistExpandedCategories();
+}
+
+function persistExpandedCategories() {
+  localStorage.setItem("expandedCategoryIds", JSON.stringify([...state.expandedCategoryIds]));
+}
+
 function categoryDescendantIds(categoryId) {
   const result = new Set();
   const stack = [Number(categoryId)];
@@ -1413,6 +1562,33 @@ async function updateFileCategory(fileId, categoryId) {
   }
 }
 
+async function renameFile(fileId) {
+  const file = state.files.find((item) => item.id === fileId);
+  const input = document.querySelector(`[data-file-name-input="${fileId}"]`);
+  const name = String(input?.value || "").trim();
+
+  if (!file || !name) {
+    showToast("Fayl adı boş ola bilməz.");
+    return;
+  }
+  if (name === file.original_name) {
+    showToast("Fayl adı dəyişməyib.");
+    return;
+  }
+
+  try {
+    await adminApi(`/api/files/${fileId}/name`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    showToast("Fayl adı yeniləndi.");
+    await loadData({ keepSelection: true });
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
 async function createCategory(name, parentId = null) {
   try {
     await adminApi("/api/categories", {
@@ -1503,29 +1679,33 @@ function openFile(fileId) {
     showToast("Import tamamlanandan sonra baxmaq olar.");
     return;
   }
+  pushViewHistory();
   state.selectedFileId = file.id;
   state.selectedSheetId = file.sheets[0]?.id || null;
   renderFileControls();
-  switchView("viewer");
+  switchView("viewer", { recordHistory: false });
 }
 
 function mergeOneFile(fileId) {
+  pushViewHistory();
   state.selectedMergeFileIds = new Set([fileId]);
   state.mergedCategoryFilter = "";
   state.mergedOffset = 0;
-  switchView("merged");
+  switchView("merged", { recordHistory: false });
 }
 
 function openCategoryFiles(categoryId) {
+  pushViewHistory();
   state.fileCategoryFilter = String(categoryId);
-  switchView("files");
+  switchView("files", { recordHistory: false });
 }
 
 function mergeCategory(categoryId) {
+  pushViewHistory();
   state.mergedCategoryFilter = String(categoryId);
   state.selectedMergeFileIds.clear();
   state.mergedOffset = 0;
-  switchView("merged");
+  switchView("merged", { recordHistory: false });
 }
 
 function prepareSubCategory(categoryId) {
@@ -1592,6 +1772,7 @@ function debounce(callback, delay = 250) {
 el.navItems.forEach((item) => item.addEventListener("click", () => switchView(item.dataset.view)));
 el.fileInput.addEventListener("change", (event) => uploadFiles([...event.target.files]));
 el.refreshBtn.addEventListener("click", () => loadData().catch((error) => showToast(error.message)));
+el.backBtn.addEventListener("click", () => goBack());
 el.themeToggle.addEventListener("click", () => {
   state.theme = state.theme === "dim" ? "light" : "dim";
   localStorage.setItem("theme", state.theme);
@@ -1628,9 +1809,10 @@ el.tableModeButtons.forEach((button) => {
 });
 
 el.clearTreeFilter.addEventListener("click", () => {
+  pushViewHistory();
   state.fileCategoryFilter = "";
   el.fileCategoryFilter.value = "";
-  switchView("files");
+  switchView("files", { recordHistory: false });
   renderCategoryTree();
 });
 
@@ -1646,6 +1828,9 @@ el.globalSearch.addEventListener(
 
 el.fileCategoryFilter.addEventListener("change", () => {
   state.fileCategoryFilter = el.fileCategoryFilter.value;
+  if (state.fileCategoryFilter && state.fileCategoryFilter !== "none") {
+    expandCategoryPath(Number(state.fileCategoryFilter), { includeSelf: true });
+  }
   renderCategoryTree();
   renderFilesPage();
 });
@@ -1769,9 +1954,24 @@ el.fullscreenMergedBtn.addEventListener("click", () => toggleFullscreen(el.merge
 el.categoryTree.addEventListener("click", (event) => {
   const target = event.target.closest("[data-tree-category]");
   if (!target) return;
-  state.fileCategoryFilter = String(target.dataset.treeCategory);
+  pushViewHistory();
+  const categoryId = Number(target.dataset.treeCategory);
+  const wasActive = String(categoryId) === String(state.fileCategoryFilter);
+  const hasChildren = target.dataset.hasChildren === "1";
+
+  if (hasChildren) {
+    if (wasActive && state.expandedCategoryIds.has(categoryId)) {
+      state.expandedCategoryIds.delete(categoryId);
+    } else {
+      state.expandedCategoryIds.add(categoryId);
+    }
+    persistExpandedCategories();
+  }
+
+  expandCategoryPath(categoryId);
+  state.fileCategoryFilter = String(categoryId);
   el.fileCategoryFilter.value = state.fileCategoryFilter;
-  switchView("files");
+  switchView("files", { recordHistory: false });
   renderCategoryTree();
 });
 
@@ -1784,6 +1984,7 @@ el.filesGrid.addEventListener("click", (event) => {
   const fileId = Number(target.dataset.id);
   if (target.dataset.action === "view") openFile(fileId);
   if (target.dataset.action === "merge-one") mergeOneFile(fileId);
+  if (target.dataset.action === "rename") renameFile(fileId);
   if (target.dataset.action === "delete") deleteFile(fileId);
   if (target.dataset.action === "reimport") reimportFile(fileId);
 });

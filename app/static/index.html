@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Excel DB Manager</title>
-    <link rel="stylesheet" href="/static/styles.css?v=data-tools-20260616" />
+    <link rel="stylesheet" href="/static/styles.css?v=folder-outline-20260624" />
   </head>
   <body>
     <div class="app-shell">
@@ -21,13 +21,13 @@
           <button class="nav-item active" data-view="files" type="button">Fayllar</button>
           <button class="nav-item" data-view="categories" type="button">Bölmələr</button>
           <button class="nav-item" data-view="viewer" type="button">Cədvəllər</button>
-          <button class="nav-item" data-view="merged" type="button">Birləşmiş data</button>
+          <button class="nav-item admin-only" data-view="merged" type="button">Birləşmiş data</button>
         </nav>
 
         <section class="folder-tree-panel">
           <div class="folder-tree-head">
-            <span>Bolme agaci</span>
-            <button class="mini-button" id="clearTreeFilter" type="button">Hamisi</button>
+            <span>Bölmə Ağacı</span>
+            <button class="mini-button" id="clearTreeFilter" type="button">Hamısı</button>
           </div>
           <div class="folder-tree" id="categoryTree"></div>
         </section>
@@ -54,6 +54,7 @@
             <h2 id="viewTitle">Fayllar</h2>
           </div>
           <div class="topbar-actions">
+            <button class="button secondary hidden" id="backBtn" type="button">Geri</button>
             <input class="search-input" id="globalSearch" type="search" placeholder="Axtar..." />
             <button class="button secondary" id="themeToggle" type="button">Dim</button>
             <span class="admin-status" id="adminStatus">Adi baxış</span>
@@ -190,7 +191,7 @@
           </div>
         </section>
 
-        <section class="view-page" id="mergedView">
+        <section class="view-page admin-only" id="mergedView">
           <div class="merge-layout">
             <aside class="merge-controls">
               <label class="field-label">
@@ -257,6 +258,6 @@
         </div>
       </form>
     </div>
-    <script src="/static/app.js?v=data-tools-20260616"></script>
+    <script src="/static/app.js?v=folder-outline-20260624"></script>
   </body>
 </html>

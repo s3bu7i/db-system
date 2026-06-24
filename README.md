@@ -34,7 +34,7 @@ Bu dəyişənlər boşdursa, admin rejimi açılmır. Lokal development üçün 
 
 ```bash
 APP_USERNAME=admin
-APP_PASSWORD=change-this-password
+APP_PASSWORD=12345678
 ```
 
 Parolu dəyişəndən sonra serveri restart edin.
@@ -49,6 +49,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
 
 Windows PowerShell üçün:
 
@@ -75,6 +76,40 @@ APP_PASSWORD: strong-password
 ```
 
 ## Ubuntu serverdə systemd deploy
+
+GitHub-dan serverə birbaşa deploy üçün:
+
+```bash
+sudo apt update
+sudo apt install -y git
+git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
+cd YOUR_REPO
+sudo bash deploy/install-ubuntu.sh
+```
+
+Script bunları avtomatik edir:
+
+- Layihəni `/opt/excel-db-manager` qovluğuna kopyalayır
+- `.venv` yaradır və `requirements.txt` paketlərini qurur
+- `/opt/excel-db-manager/.env` yaradır
+- systemd link yaradır: `/etc/systemd/system/excel-db-manager.service`
+- Servisi enable/start edir
+
+Admin parolunu dəyişmək:
+
+```bash
+sudo nano /opt/excel-db-manager/.env
+sudo systemctl restart excel-db-manager
+```
+
+Status və log:
+
+```bash
+sudo systemctl status excel-db-manager
+sudo journalctl -u excel-db-manager -f
+```
+
+Manual deploy:
 
 ```bash
 sudo mkdir -p /opt/excel-db-manager

@@ -267,12 +267,14 @@ def _import_xlsx(file_id: int, path: str) -> None:
             row_count = 0
             column_count = worksheet.max_column or 0
             heading_rows: list[list[Any]] = []
-            batch: list[tuple[int, int, str]] = []
+            batch: list[tuple[int, int, str, str]] = []
 
-            for row_number, row in enumerate(worksheet.iter_rows(values_only=True), start=1):
+            for row_number, row in enumerate(worksheet.iter_rows(values_only=False), start=1):
                 processed_rows += 1
-                values = [_normalize_value(value) for value in row]
+                values = [_normalize_value(cell.value) for cell in row]
+                styles = _xlsx_row_styles(row)
                 values = _trim_trailing_empty(values)
+                styles = _trim_row_styles(styles, len(values))
                 if not values:
                     continue
 
@@ -280,7 +282,14 @@ def _import_xlsx(file_id: int, path: str) -> None:
                     heading_rows.append(values)
                 row_count += 1
                 column_count = max(column_count, len(values))
-                batch.append((sheet_id, row_number, json.dumps(values, ensure_ascii=False)))
+                batch.append(
+                    (
+                        sheet_id,
+                        row_number,
+                        json.dumps(values, ensure_ascii=False),
+                        json.dumps(styles, ensure_ascii=False),
+                    )
+                )
 
                 if len(batch) >= BATCH_SIZE:
                     _insert_rows(batch)
@@ -304,7 +313,7 @@ def _import_xls(file_id: int, path: str) -> None:
             row_count = 0
             column_count = worksheet.ncols
             heading_rows: list[list[Any]] = []
-            batch: list[tuple[int, int, str]] = []
+            batch: list[tuple[int, int, str, str]] = []
 
             for row_idx in range(worksheet.nrows):
                 processed_rows += 1
@@ -312,7 +321,9 @@ def _import_xls(file_id: int, path: str) -> None:
                     _normalize_xls_cell(worksheet.cell(row_idx, col_idx), workbook.datemode)
                     for col_idx in range(worksheet.ncols)
                 ]
+                styles = _xls_row_styles(workbook, worksheet, row_idx)
                 values = _trim_trailing_empty(values)
+                styles = _trim_row_styles(styles, len(values))
                 if not values:
                     continue
 
@@ -320,7 +331,14 @@ def _import_xls(file_id: int, path: str) -> None:
                     heading_rows.append(values)
                 row_count += 1
                 column_count = max(column_count, len(values))
-                batch.append((sheet_id, row_idx + 1, json.dumps(values, ensure_ascii=False)))
+                batch.append(
+                    (
+                        sheet_id,
+                        row_idx + 1,
+                        json.dumps(values, ensure_ascii=False),
+                        json.dumps(styles, ensure_ascii=False),
+                    )
+                )
 
                 if len(batch) >= BATCH_SIZE:
                     _insert_rows(batch)
@@ -348,16 +366,43 @@ def _create_sheet(file_id: int, name: str, sheet_index: int, meta: dict[str, Any
         return int(cursor.lastrowid)
 
 
-def _insert_rows(rows: list[tuple[int, int, str]]) -> None:
+def _insert_rows(rows: list[tuple[int, int, str, str]]) -> None:
     with get_conn() as conn:
         conn.executemany(
             """
-            INSERT OR REPLACE INTO sheet_rows (sheet_id, row_number, cells_json)
-            VALUES (?, ?, ?)
+            INSERT OR REPLACE INTO sheet_rows (sheet_id, row_number, cells_json, styles_json)
+            VALUES (?, ?, ?, ?)
             """,
             rows,
         )
         conn.commit()
+
+
+def _xlsx_row_styles(row: tuple[Any, ...]) -> dict[str, list[int]]:
+    bold = [
+        index
+        for index, cell in enumerate(row)
+        if bool(getattr(getattr(cell, "font", None), "bold", False))
+    ]
+    return {"bold": bold} if bold else {}
+
+
+def _xls_row_styles(workbook: Any, worksheet: Any, row_idx: int) -> dict[str, list[int]]:
+    bold: list[int] = []
+    for col_idx in range(worksheet.ncols):
+        try:
+            xf_index = worksheet.cell_xf_index(row_idx, col_idx)
+            font_index = workbook.xf_list[xf_index].font_index
+            if bool(workbook.font_list[font_index].bold):
+                bold.append(col_idx)
+        except (AttributeError, IndexError):
+            continue
+    return {"bold": bold} if bold else {}
+
+
+def _trim_row_styles(styles: dict[str, list[int]], cell_count: int) -> dict[str, list[int]]:
+    bold = [index for index in styles.get("bold", []) if index < cell_count]
+    return {"bold": bold} if bold else {}
 
 
 def _finish_sheet(sheet_id: int, row_count: int, column_count: int, heading_text: str) -> None:

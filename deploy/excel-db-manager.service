@@ -7,8 +7,7 @@ Type=simple
 WorkingDirectory=/opt/excel-db-manager
 Environment=DATA_DIR=/opt/excel-db-manager/data
 Environment=UPLOAD_DIR=/opt/excel-db-manager/uploads
-Environment=APP_USERNAME=admin
-Environment=APP_PASSWORD=change-this-password
+EnvironmentFile=-/opt/excel-db-manager/.env
 ExecStart=/opt/excel-db-manager/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=5

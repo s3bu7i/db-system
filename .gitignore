@@ -3,8 +3,19 @@ __pycache__/
 .venv/
 venv/
 .env
+.env.*
+!.env.example
 data/*.db
 data/*.db-*
 uploads/*
 !uploads/.gitkeep
 *.log
+
+# Private/local Excel source folders and files
+VEB 2025/
+ƏRZAQ BALANSI VEB_2024/
+*.xls
+*.xlsx
+*.xlsm
+*.xltx
+*.xltm
