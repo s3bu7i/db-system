@@ -8,8 +8,8 @@ services:
     environment:
       DATA_DIR: /app/data
       UPLOAD_DIR: /app/uploads
-      # APP_USERNAME: admin
-      # APP_PASSWORD: change-this-password
+      APP_USERNAME: admin
+      APP_PASSWORD: 12345678
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads

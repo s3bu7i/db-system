@@ -271,7 +271,7 @@ def _import_xlsx(file_id: int, path: str) -> None:
 
             for row_number, row in enumerate(worksheet.iter_rows(values_only=False), start=1):
                 processed_rows += 1
-                values = [_normalize_value(cell.value) for cell in row]
+                values = [_normalize_xlsx_cell(cell) for cell in row]
                 styles = _xlsx_row_styles(row)
                 values = _trim_trailing_empty(values)
                 styles = _trim_row_styles(styles, len(values))
@@ -318,7 +318,11 @@ def _import_xls(file_id: int, path: str) -> None:
             for row_idx in range(worksheet.nrows):
                 processed_rows += 1
                 values = [
-                    _normalize_xls_cell(worksheet.cell(row_idx, col_idx), workbook.datemode)
+                    _normalize_xls_cell(
+                        worksheet.cell(row_idx, col_idx),
+                        workbook.datemode,
+                        _xls_cell_format(workbook, worksheet, row_idx, col_idx),
+                    )
                     for col_idx in range(worksheet.ncols)
                 ]
                 styles = _xls_row_styles(workbook, worksheet, row_idx)
@@ -436,7 +440,15 @@ def _normalize_value(value: Any) -> str | int | float | bool:
     return str(value)
 
 
-def _normalize_xls_cell(cell: Any, datemode: int) -> str | int | float | bool:
+def _normalize_xlsx_cell(cell: Any) -> str | int | float | bool:
+    value = getattr(cell, "value", None)
+    padded = _zero_padded_number(value, getattr(cell, "number_format", ""))
+    if padded is not None:
+        return padded
+    return _normalize_value(value)
+
+
+def _normalize_xls_cell(cell: Any, datemode: int, number_format: str = "") -> str | int | float | bool:
     if cell.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
         return ""
     if cell.ctype == xlrd.XL_CELL_DATE:
@@ -447,8 +459,56 @@ def _normalize_xls_cell(cell: Any, datemode: int) -> str | int | float | bool:
     if cell.ctype == xlrd.XL_CELL_BOOLEAN:
         return bool(cell.value)
     if cell.ctype == xlrd.XL_CELL_NUMBER:
+        padded = _zero_padded_number(cell.value, number_format)
+        if padded is not None:
+            return padded
         return int(cell.value) if float(cell.value).is_integer() else cell.value
     return str(cell.value)
+
+
+def _xls_cell_format(workbook: Any, worksheet: Any, row_idx: int, col_idx: int) -> str:
+    try:
+        xf_index = worksheet.cell_xf_index(row_idx, col_idx)
+        format_key = workbook.xf_list[xf_index].format_key
+        return workbook.format_map[format_key].format_str
+    except (AttributeError, KeyError, IndexError):
+        return ""
+
+
+def _zero_padded_number(value: Any, number_format: str) -> str | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not float(value).is_integer() or value < 0:
+        return None
+
+    width = _zero_padding_width(number_format)
+    if width <= 1:
+        return None
+
+    raw = str(int(value))
+    if len(raw) > width:
+        return None
+    return raw.zfill(width)
+
+
+def _zero_padding_width(number_format: str) -> int:
+    section = str(number_format or "").split(";")[0]
+    section = _strip_number_format_literals(section).strip()
+    if not section or any(marker in section for marker in ("%", ".", "/", "E+", "E-")):
+        return 0
+    if not re.fullmatch(r"[0#,?\s]+", section):
+        return 0
+    zero_count = section.count("0")
+    return zero_count if zero_count > 1 else 0
+
+
+def _strip_number_format_literals(number_format: str) -> str:
+    value = re.sub(r'"[^"]*"', "", number_format)
+    value = re.sub(r"\[[^\]]+\]", "", value)
+    value = re.sub(r"\\.", "", value)
+    value = re.sub(r"_.", "", value)
+    value = re.sub(r"\*.", "", value)
+    return value
 
 
 def _trim_trailing_empty(values: list[Any]) -> list[Any]:

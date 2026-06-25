@@ -1017,7 +1017,9 @@ function numericCount(cells) {
 function numericLike(value) {
   if (typeof value === "number") return true;
   if (typeof value !== "string") return false;
-  const normalized = value.trim().replace(",", ".");
+  const text = value.trim();
+  if (/^0\d+$/.test(text)) return false;
+  const normalized = text.replace(",", ".");
   return normalized !== "" && !Number.isNaN(Number(normalized));
 }
 
@@ -1031,11 +1033,15 @@ function formatCellValue(value) {
   const text = String(value).trim();
   if (!text) return "";
   if (/%$/.test(text)) {
-    const percentNumber = Number(text.slice(0, -1).replace(",", "."));
-    if (Number.isFinite(percentNumber)) {
-      return `${new Intl.NumberFormat("az-AZ", { maximumFractionDigits: 2 }).format(percentNumber)}%`;
+    const percentText = text.slice(0, -1).trim();
+    if (percentText) {
+      const percentNumber = Number(percentText.replace(",", "."));
+      if (Number.isFinite(percentNumber)) {
+        return `${new Intl.NumberFormat("az-AZ", { maximumFractionDigits: 2 }).format(percentNumber)}%`;
+      }
     }
   }
+  if (/^0\d+$/.test(text)) return text;
   const normalized = text.replace(/\s/g, "").replace(",", ".");
   if (!normalized || Number.isNaN(Number(normalized))) return text;
   const number = Number(normalized);
