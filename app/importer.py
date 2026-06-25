@@ -254,7 +254,7 @@ def _sheet_heading_text(rows: list[list[Any]]) -> str:
 
 def _import_xlsx(file_id: int, path: str) -> None:
     sheet_metadata = _xlsx_sheet_metadata(path)
-    with _open_xlsx_workbook(path, read_only=True, data_only=False) as workbook:
+    with _open_xlsx_workbook(path, read_only=True, data_only=True) as workbook:
         total_rows = sum((sheet.max_row or 0) for sheet in workbook.worksheets) or 1
         processed_rows = 0
         for sheet_index, worksheet in enumerate(workbook.worksheets, start=1):
